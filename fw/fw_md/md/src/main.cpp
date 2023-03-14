@@ -455,7 +455,7 @@ int main(int argc, char** argv)
             }
             pre_release_flag = release_flag;
         }
-	if(fobstacle_counter >= 100) {
+	if(fobstacle_counter >= 500) {
 	  fobstacle_pub.publish(fobstacle_flag);
           fobstacle_counter = 0;
         }
