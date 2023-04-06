@@ -254,9 +254,9 @@ int main(int argc, char** argv)
         double moving_check_time = ros::Time::now().toSec();
 
         geometry_msgs::Quaternion quaternion = tf::createQuaternionMsgFromYaw((fo.posth)); //fo.posth
-       // transform.setOrigin(tf::Vector3(fo.posx,fo.posy,0));
-       // transform.setRotation(tf::Quaternion(quaternion.x,quaternion.y,quaternion.z,quaternion.w));
-       // odom_broadcaster.sendTransform(tf::StampedTransform(transform,  current_time, "odom_md_frame", "base_footprint")); //current_time = ros::Time::now()
+        transform.setOrigin(tf::Vector3(fo.posx,fo.posy,0));
+        transform.setRotation(tf::Quaternion(quaternion.x,quaternion.y,quaternion.z,quaternion.w));
+        odom_broadcaster.sendTransform(tf::StampedTransform(transform,  current_time, "odom_md_frame", "base_footprint")); //current_time = ros::Time::now()
        
         odom.header.stamp = current_time;
         odom.header.frame_id = "odom_md_frame";

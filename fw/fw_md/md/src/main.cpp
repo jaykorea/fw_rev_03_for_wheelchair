@@ -11,7 +11,7 @@
 #include "md/monitor_msg.h"
 
 #include <ros/ros.h>
-
+#include <boost/bind.hpp>
 #include <sensor_msgs/LaserScan.h>
 #include <std_msgs/Bool.h>
 #include <math.h>
@@ -113,10 +113,16 @@ void release_cb(const std_msgs::Bool& release_msg) {
     release_flag = release_msg.data;
 }
 
+void resume_tim_cb(const ros::TimerEvent&, ros::Publisher& pub) {
+    std_msgs::Empty resume_msg;
+    pub.publish(resume_msg);
+}
+
 int main(int argc, char** argv)
 {
     ros::init(argc, argv, "md_node");                                                   //Node name initialization.
     ros::NodeHandle nh;                                                                 //Node handle declaration for communication with ROS system.
+    ros::Timer timer;
     ros::Subscriber vel_sub = nh.subscribe("vel_topic", 100, velCallBack);
     ros::Subscriber input_scan_sub = nh.subscribe("/scan_rp_filtered", 100, update_scan);               //Subscriber declaration.
     ros::Subscriber release_button_sub = nh.subscribe("freeway/release", 10, release_cb);
@@ -420,6 +426,7 @@ int main(int argc, char** argv)
         if (signal_checker >= 30 && e_stop_flag ==false) {
             actionlib_msgs::GoalID empty_goal;
             geometry_msgs::Twist cmd_e_vel_msg;
+	    timer.stop();
             //std_msgs::Empty cancel_msg;
             //Com.nSlowdown = 50;
             // if(InitSetSlowDown()) {
@@ -435,11 +442,12 @@ int main(int argc, char** argv)
             e_stop_flag = true;
         }
         else if (e_stop_flag == true && signal_checker == 0) {
-            std_msgs::Empty resume_msg;
+            //std_msgs::Empty resume_msg;
+	    timer = nh.createTimer(ros::Duration(2.0), boost::bind(resume_tim_cb, _1, resume_pub ));
             //Com.nSlowdown = 800;
             //InitSetSlowDown();
             //ros::param::set("/md_node/slowdown", Com.nSlowdown);
-            resume_pub.publish(resume_msg);
+            //resume_pub.publish(resume_msg);
             e_stop_flag=false;
             //ROS_INFO("Emergency_Safety_LiDAR Released!!!!!!!!!!!!!!!!!!!!");
         }
