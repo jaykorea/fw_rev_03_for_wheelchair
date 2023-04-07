@@ -271,19 +271,19 @@ int main(int argc, char** argv)
         odom.twist.twist.angular.z = fo.angz;
 
         odom.pose.covariance[0] = 0.3;
-	odom.pose.covariance[7] = 0.3;
-	odom.pose.covariance[14] = 9999.0;
-	odom.pose.covariance[21] = 9999.0;
-	odom.pose.covariance[28] = 9999.0;
+	    odom.pose.covariance[7] = 0.3;
+	    odom.pose.covariance[14] = 9999.0;
+	    odom.pose.covariance[21] = 9999.0;
+	    odom.pose.covariance[28] = 9999.0;
 
         if(moving_check(fo.posx, fo.posy, quaternion.z, moving_check_time)) {
-	    odom.pose.covariance[35] = 0.0;
+	        odom.pose.covariance[35] = 0.0;
             moving_check_flag.data = true; // when true it's not moving
         }
 
         else {
             moving_check_flag.data = false; // when false is's moving
-	    odom.pose.covariance[35] = 1.0;
+	        odom.pose.covariance[35] = 1.0;
         }
 
         odom.twist.covariance = odom.pose.covariance;

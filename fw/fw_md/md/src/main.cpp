@@ -12,32 +12,21 @@
 
 #include <ros/ros.h>
 #include <boost/bind.hpp>
-#include <sensor_msgs/LaserScan.h>
 #include <std_msgs/Bool.h>
 #include <math.h>
 #include <sstream>
 #include "geometry_msgs/Twist.h"
 #include "actionlib_msgs/GoalStatusArray.h"
 #include "std_msgs/Empty.h"
-
-#define signal_distance 0.4
-#define signal_distance_teb 0.45
-#define signal_release 0.55
+#include "std_srvs/Empty.h"
 
 #define SET_STOP_STATUS false
 
-
-int32_t signal_checker = 0;
-int32_t signal_checker_teb = 0;
-int32_t signal2_checker = 0;
-int32_t signal2_checker_teb = 0;
 bool e_stop_flag = false;
 bool release_flag = false;
 bool once_flag = false;
 bool pre_release_flag = false;
-
-std_msgs::Bool fobstacle_flag;
-int fobstacle_counter;
+bool front_obstacle_detected = false;
 
 TableOfRobotControlRegister RB;
 Communication Com;
@@ -55,59 +44,10 @@ void velCallBack(const md::vel_msg::ConstPtr& vel)
     Com.fgResetAlarm    = vel->byResetAlarm;
 }
 
-void update_scan(const sensor_msgs::LaserScan& input_scan)
+void front_obstacle_cb(const std_msgs::Bool& front_obstacle_msg)
 {
-  //reset = signal;
-  if (!input_scan.ranges.empty()) {
-      float res_per_deg = (int)input_scan.ranges.size() / (float)360.0;
-      float las_mid_ran = res_per_deg * (float)180.0;
-      float deg_15 = floor(res_per_deg * (float)15.0);
-      float* ran_arr = new float[8*int(floor(deg_15))]();
-
-      for (unsigned int i = 0; i < 4*int(floor(deg_15)); i++) {
-        if(input_scan.ranges[i] < signal_distance) {
-          signal_checker++;
-        }
-	if(input_scan.ranges[i] < signal_distance_teb) {
-         signal_checker_teb++;
-        }
-        ran_arr[i]=input_scan.ranges[i];
-      }
-
-      for (unsigned int i = input_scan.ranges.size()-1 - 4*int(floor(deg_15)); i < input_scan.ranges.size()-1; i++) {
-        if(input_scan.ranges[i] < signal_distance) {
-          signal_checker++;
-        }
-	if(input_scan.ranges[i] < signal_distance_teb) {
-	  signal_checker_teb++;
-	}
-        if (signal_checker >= 30) {
-          signal_checker = 30;
-          //ROS_INFO("Emergency_Safety_LiDAR Detection!!!!!!!!!!!!!!!!!!!!");
-        }
-	if (signal_checker_teb >= 30) {
-	  signal_checker_teb = 30;
-	}
-        ran_arr[(i+(4*int(floor(deg_15))))-(input_scan.ranges.size()-1 - 4*int(floor(deg_15)))]=input_scan.ranges[i];
-      }      
-      for (unsigned int i = 0; i < 8*int(floor(deg_15))-1; i++) {
-        if (ran_arr[i] >= signal_release) {
-          signal2_checker++;
-	  signal2_checker_teb++;
-        }
-      }
-      if (signal2_checker >= 8*int(floor(deg_15))-2) {
-        signal2_checker =0;
-        signal_checker = 0;
-	signal2_checker_teb = 0;
-	signal_checker_teb = 0;
-      }
-      else if (signal2_checker < 8*int(floor(deg_15))-2) { signal2_checker = 0; signal2_checker_teb = 0; }
-      
-      delete [] ran_arr;
-     }
-
-   }
+    front_obstacle_detected = front_obstacle_msg.data;
+}
 
 void release_cb(const std_msgs::Bool& release_msg) {
     release_flag = release_msg.data;
@@ -124,7 +64,7 @@ int main(int argc, char** argv)
     ros::NodeHandle nh;                                                                 //Node handle declaration for communication with ROS system.
     ros::Timer timer;
     ros::Subscriber vel_sub = nh.subscribe("vel_topic", 100, velCallBack);
-    ros::Subscriber input_scan_sub = nh.subscribe("/scan_rp_filtered", 100, update_scan);               //Subscriber declaration.
+    ros::Subscriber front_obstacle_sub = nh.subscribe("/freeway/front_obstacle", 100, front_obstacle_cb);               //Subscriber declaration.
     ros::Subscriber release_button_sub = nh.subscribe("freeway/release", 10, release_cb);
     ros::Publisher resume_pub = nh.advertise<std_msgs::Empty>("/freeway/resume", 10);
     ros::Publisher move_base_cancel_pub = nh.advertise<actionlib_msgs::GoalID>("move_base_flex/move_base/cancel", 10);
@@ -132,8 +72,7 @@ int main(int argc, char** argv)
     ros::Publisher cmd_e_vel_pub = nh.advertise<geometry_msgs::Twist>("cmd_vel", 100);
     ros::Publisher monitor_pub = nh.advertise<md::monitor_msg>("monitor_topic", 100);   //Publisher declaration.
     ros::Publisher string_pub = nh.advertise<std_msgs::String>("string_com_topic", 100);
-    ros::Publisher fobstacle_pub = nh.advertise<std_msgs::Bool>("front_obstacle", 10);
-
+    ros::ServiceClient clearcostmap_pub = nh.serviceClient<std_srvs::Empty>("move_base_flex/clear_costmaps");
     md::monitor_msg monitor;                                                            //monitor_msg declares message 'message' as message file.
 
     ros::Rate r(10000);                                                                 //Set the loop period -> 100us.
@@ -415,18 +354,11 @@ int main(int argc, char** argv)
                 }
             }
         }
-	if (signal_checker_teb >= 30)  {
-	  fobstacle_flag.data = true;
-	}
-	else if (signal_checker_teb == 0){
-	  fobstacle_flag.data = false;
-	}
-        fobstacle_counter++;
 
-        if (signal_checker >= 30 && e_stop_flag ==false) {
+        if (front_obstacle_detected == true && e_stop_flag ==false) {
             actionlib_msgs::GoalID empty_goal;
             geometry_msgs::Twist cmd_e_vel_msg;
-	    timer.stop();
+	        timer.stop();
             //std_msgs::Empty cancel_msg;
             //Com.nSlowdown = 50;
             // if(InitSetSlowDown()) {
@@ -441,9 +373,11 @@ int main(int argc, char** argv)
             //freeway_goal_cancel_pub.publish(cancel_msg);
             e_stop_flag = true;
         }
-        else if (e_stop_flag == true && signal_checker == 0) {
+        else if (e_stop_flag == true && front_obstacle_detected == false) {
+	        std_srvs::Empty srv;
+	        clearcostmap_pub.call(srv);
             //std_msgs::Empty resume_msg;
-	    timer = nh.createTimer(ros::Duration(2.0), boost::bind(resume_tim_cb, _1, resume_pub ));
+	        timer = nh.createTimer(ros::Duration(2.7), boost::bind(resume_tim_cb, _1, resume_pub), true);
             //Com.nSlowdown = 800;
             //InitSetSlowDown();
             //ros::param::set("/md_node/slowdown", Com.nSlowdown);
@@ -451,22 +385,19 @@ int main(int argc, char** argv)
             e_stop_flag=false;
             //ROS_INFO("Emergency_Safety_LiDAR Released!!!!!!!!!!!!!!!!!!!!");
         }
-        if(SET_STOP_STATUS) {
-            if( pre_release_flag != release_flag) once_flag = true;
-            if (release_flag && once_flag) { //release button pushed
-                once_flag = false;
-                InitUnSetStopStatus();
-            }
-            else if (!release_flag && once_flag) {
-                once_flag = false;
-                InitSetStopStatus();
-            }
-            pre_release_flag = release_flag;
-        }
-	if(fobstacle_counter >= 500) {
-	  fobstacle_pub.publish(fobstacle_flag);
-          fobstacle_counter = 0;
-        }
+        // if(SET_STOP_STATUS) {
+        //     if( pre_release_flag != release_flag) once_flag = true;
+        //     if (release_flag && once_flag) { //release button pushed
+        //         once_flag = false;
+        //         InitUnSetStopStatus();
+        //     }
+        //     else if (!release_flag && once_flag) {
+        //         once_flag = false;
+        //         InitSetStopStatus();
+        //     }
+        //     pre_release_flag = release_flag;
+        // }
+
         ros::spinOnce();
         r.sleep();
     } 
