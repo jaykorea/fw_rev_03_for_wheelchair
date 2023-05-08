@@ -13,12 +13,15 @@
 #include <ros/ros.h>
 #include <boost/bind.hpp>
 #include <std_msgs/Bool.h>
+#include <std_msgs/Float32.h>
 #include <math.h>
 #include <sstream>
 #include "geometry_msgs/Twist.h"
+#include "nav_msgs/Odometry.h"
 #include "actionlib_msgs/GoalStatusArray.h"
 #include "std_msgs/Empty.h"
 #include "std_srvs/Empty.h"
+#include "freeway_msgs/DistanceTimeCalculator.h"
 
 #define SET_STOP_STATUS false
 
@@ -27,6 +30,10 @@ bool release_flag = false;
 bool once_flag = false;
 bool pre_release_flag = false;
 bool front_obstacle_detected = false;
+float ttc_time;
+freeway_msgs::DistanceTimeCalculator dt;
+geometry_msgs::Twist cmd_vel_msg;
+nav_msgs::Odometry odom;
 
 TableOfRobotControlRegister RB;
 Communication Com;
@@ -44,35 +51,36 @@ void velCallBack(const md::vel_msg::ConstPtr& vel)
     Com.fgResetAlarm    = vel->byResetAlarm;
 }
 
-void front_obstacle_cb(const std_msgs::Bool& front_obstacle_msg)
+void init_set_brake_stop_cb(const std_msgs::Empty& msg)
 {
-    front_obstacle_detected = front_obstacle_msg.data;
+    InitSetBrakeStop();
 }
 
-void release_cb(const std_msgs::Bool& release_msg) {
-    release_flag = release_msg.data;
+void release_cb(const std_msgs::Bool::ConstPtr& release_msg) {
+    release_flag = release_msg->data;
 }
 
-void resume_tim_cb(const ros::TimerEvent&, ros::Publisher& pub) {
-    std_msgs::Empty resume_msg;
-    pub.publish(resume_msg);
+void front_obstacle_update_cb(const std_msgs::Bool::ConstPtr& msg) {
+   front_obstacle_detected = msg->data;
+}
+
+void cmd_vel_update_cb(const geometry_msgs::Twist::ConstPtr& msg) {
+    cmd_vel_msg = *msg;
 }
 
 int main(int argc, char** argv)
 {
     ros::init(argc, argv, "md_node");                                                   //Node name initialization.
     ros::NodeHandle nh;                                                                 //Node handle declaration for communication with ROS system.
-    ros::Timer timer;
     ros::Subscriber vel_sub = nh.subscribe("vel_topic", 100, velCallBack);
-    ros::Subscriber front_obstacle_sub = nh.subscribe("/freeway/front_obstacle", 100, front_obstacle_cb);               //Subscriber declaration.
-    ros::Subscriber release_button_sub = nh.subscribe("freeway/release", 10, release_cb);
-    ros::Publisher resume_pub = nh.advertise<std_msgs::Empty>("/freeway/resume", 10);
-    ros::Publisher move_base_cancel_pub = nh.advertise<actionlib_msgs::GoalID>("move_base_flex/move_base/cancel", 10);
-    //ros::Publisher freeway_goal_cancel_pub = nh.advertise<std_msgs::Empty>("freeway/goal_cancel", 10);
-    ros::Publisher cmd_e_vel_pub = nh.advertise<geometry_msgs::Twist>("cmd_vel", 100);
+    ros::Subscriber release_button_sub = nh.subscribe("/freeway/release", 10, release_cb);
+    ros::Subscriber front_obstacle_sub = nh.subscribe("/freeway/front_obstacle_teb", 1, front_obstacle_update_cb);
+    ros::Subscriber dt_sub = nh.subscribe("/freeway/initsetbrakestop", 10, init_set_brake_stop_cb);
+    ros::Subscriber cmd_sub = nh.subscribe("/cmd_vel", 10, cmd_vel_update_cb);
+    ros::Publisher cancel_pub = nh.advertise<actionlib_msgs::GoalID>("move_base_flex/move_base/cancel", 10);
     ros::Publisher monitor_pub = nh.advertise<md::monitor_msg>("monitor_topic", 100);   //Publisher declaration.
     ros::Publisher string_pub = nh.advertise<std_msgs::String>("string_com_topic", 100);
-    ros::ServiceClient clearcostmap_pub = nh.serviceClient<std_srvs::Empty>("move_base_flex/clear_costmaps");
+    ros::Publisher cmd_emer_super_pub = nh.advertise<geometry_msgs::Twist>("cmd_vel/super_emer", 1);
     md::monitor_msg monitor;                                                            //monitor_msg declares message 'message' as message file.
 
     ros::Rate r(10000);                                                                 //Set the loop period -> 100us.
@@ -354,36 +362,20 @@ int main(int argc, char** argv)
                 }
             }
         }
-
-        if (front_obstacle_detected == true && e_stop_flag ==false) {
-            actionlib_msgs::GoalID empty_goal;
-            geometry_msgs::Twist cmd_e_vel_msg;
-	        timer.stop();
-            //std_msgs::Empty cancel_msg;
-            //Com.nSlowdown = 50;
-            // if(InitSetSlowDown()) {
-            // ROS_INFO("Emergency_Safety_LiDAR Activated!!!!!!!!!!!!!!!!!!!!");
-            // }
-            cmd_e_vel_msg.linear.x = 0.0;
-            cmd_e_vel_msg.angular.z = 0.0;
-            cmd_e_vel_pub.publish(cmd_e_vel_msg);
-            InitSetBrakeStop();
-            //ros::param::set("/md_node/slowdown", Com.nSlowdown);
-            move_base_cancel_pub.publish(empty_goal);
-            //freeway_goal_cancel_pub.publish(cancel_msg);
-            e_stop_flag = true;
-        }
+        if ( e_stop_flag == false && front_obstacle_detected == true) {
+        // Stop the robot if a front obstacle is detected
+        geometry_msgs::Twist zero_velocity;
+	zero_velocity = geometry_msgs::Twist();
+	actionlib_msgs::GoalID empty_goal;
+	cancel_pub.publish(empty_goal);
+        InitSetBrakeStop();
+	do { cmd_emer_super_pub.publish(zero_velocity);
+        } while (cmd_vel_msg.linear.x == 0.0);
+	e_stop_flag = true;
+        } 
         else if (e_stop_flag == true && front_obstacle_detected == false) {
-	        std_srvs::Empty srv;
-	        clearcostmap_pub.call(srv);
-            //std_msgs::Empty resume_msg;
-	        timer = nh.createTimer(ros::Duration(2.7), boost::bind(resume_tim_cb, _1, resume_pub), true);
-            //Com.nSlowdown = 800;
-            //InitSetSlowDown();
-            //ros::param::set("/md_node/slowdown", Com.nSlowdown);
-            //resume_pub.publish(resume_msg);
-            e_stop_flag=false;
-            //ROS_INFO("Emergency_Safety_LiDAR Released!!!!!!!!!!!!!!!!!!!!");
+          // Resume normal operation if no front obstacle is detected
+          e_stop_flag = false;
         }
         // if(SET_STOP_STATUS) {
         //     if( pre_release_flag != release_flag) once_flag = true;
