@@ -167,8 +167,7 @@ void e_stop_timer_callback(const ros::TimerEvent& event, ros::NodeHandle& nh)
             ROS_INFO("Resume Super timer callback Started!!!");
             std_msgs::Empty resume_msg;
             resume_pub.publish(resume_msg);
-            bool resume_feedback_msg_data = resume_feedback_msg.data;
-            if (resume_feedback_msg_data == -1) {
+            if (resume_feedback_msg.data == -1) {
                 ROS_INFO("Resume Super timer callback Stopped!!!, status_info: %d", resume_feedback_msg.data);
                 resume_timer.stop();
                }
@@ -196,7 +195,7 @@ int main(int argc, char** argv)
     resume_pub = nh.advertise<std_msgs::Empty>("/freeway/resume", 10);
 
     md::monitor_msg monitor;                                                            //monitor_msg declares message 'message' as message file.
-
+    resume_feedback_msg.data = -1;
     //std::thread e_stop_thread(e_stop_thread_function);
     // create a timer and pass the node handle to the callback function
     //ros::Timer timer = nh.createTimer(ros::Duration(0.025), e_stop_timer_callback(event, nh);
